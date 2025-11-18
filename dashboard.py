@@ -1,17 +1,7 @@
-# --- НЕОБХОДИМЫЕ УСТАНОВКИ ---
-#
-# 1. Убедись, что main.py уже запущен! (uvicorn main:app --reload)
-# 2. Установи streamlit:
-#    pip install streamlit requests
-#
-# 3. Запуск (в НОВОМ, втором терминале):
-#    streamlit run dashboard.py
-#
-# ---------------------------------
-
 import streamlit as st
 import requests
 import pandas as pd
+import time
 
 # --- Конфигурация ---
 API_BASE_URL = "http://127.0.0.1:8000"
@@ -26,187 +16,220 @@ if "error" not in st.session_state:
 if "success_msg" not in st.session_state:
     st.session_state.success_msg = ""
 
-# --- Функции API ---
+# --- Вспомогательные функции ---
 
-def login(username, password):
-    """Попытка входа в API"""
+def get_auth_headers():
+    return {"Authorization": f"Bearer {st.session_state.access_token}"}
+
+def login_process(username, password):
+    """Логика входа"""
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/token",
-            data={"username": username, "password": password}
-        )
+        response = requests.post(f"{API_BASE_URL}/token", data={"username": username, "password": password})
         if response.status_code == 200:
             tokens = response.json()
             st.session_state.access_token = tokens["access_token"]
             st.session_state.username = username
             st.session_state.error = ""
-            st.session_state.success_msg = ""
-            st.rerun()
+            return True # Успех
         elif response.status_code == 429:
-             st.session_state.error = "⛔ Слишком много попыток! (Rate Limit сработал)"
+             st.session_state.error = "⛔ Слишком много попыток! (Rate Limit)"
         else:
             st.session_state.error = "❌ Неверный логин или пароль"
-    except requests.exceptions.ConnectionError:
-        st.session_state.error = "🔌 Не удается подключиться к API. (main.py запущен?)"
+    except requests.exceptions.RequestException: # Ловим ТОЛЬКО ошибки сети
+        st.session_state.error = "🔌 API недоступен (проверьте uvicorn)"
+    return False
 
-def register(username, password):
-    """Регистрация нового пользователя"""
+def register_process(username, password):
+    """Логика регистрации"""
     try:
-        # По умолчанию регистрируем обычного user, не админа
-        response = requests.post(
-            f"{API_BASE_URL}/register",
-            json={"username": username, "password": password, "role": "user"}
-        )
+        response = requests.post(f"{API_BASE_URL}/register", json={"username": username, "password": password, "role": "user"})
         if response.status_code == 200:
             st.session_state.success_msg = f"✅ Пользователь '{username}' создан! Теперь войдите."
             st.session_state.error = ""
-        elif response.status_code == 400:
-            st.session_state.error = "❌ Такой пользователь уже существует."
         else:
-            st.session_state.error = f"Ошибка регистрации: {response.text}"
-    except requests.exceptions.ConnectionError:
-        st.session_state.error = "🔌 Не удается подключиться к API."
+            st.session_state.error = f"Ошибка: {response.text}"
+    except requests.exceptions.RequestException:
+        st.session_state.error = "🔌 API недоступен"
 
-def logout():
-    """Выход из системы"""
+def logout_process():
     st.session_state.access_token = ""
     st.session_state.username = ""
-    st.session_state.error = ""
-    st.session_state.success_msg = ""
     st.rerun()
 
-def get_auth_headers():
-    return {"Authorization": f"Bearer {st.session_state.access_token}"}
-
+# --- Функции запросов данных ---
 def get_config_flags():
-    if not st.session_state.access_token: return None
     try:
-        response = requests.get(f"{API_BASE_URL}/admin/config", headers=get_auth_headers())
-        if response.status_code == 200: return response.json()
-        elif response.status_code == 401: logout()
-        return None
+        return requests.get(f"{API_BASE_URL}/admin/config", headers=get_auth_headers()).json()
     except: return None
 
-def toggle_feature(feature_name: str):
+def toggle_feature(feature):
     try:
-        response = requests.post(f"{API_BASE_URL}/admin/toggle/{feature_name}", headers=get_auth_headers())
-        if response.status_code == 200: st.toast(f"Флаг '{feature_name}' переключен!", icon="✅")
-        elif response.status_code == 401: logout()
+        requests.post(f"{API_BASE_URL}/admin/toggle/{feature}", headers=get_auth_headers())
+        # Не делаем rerun здесь, Streamlit сам обновит состояние при клике
     except: pass
 
-def get_security_logs():
-    if not st.session_state.access_token: return None
+def get_logs():
     try:
-        response = requests.get(f"{API_BASE_URL}/admin/logs", headers=get_auth_headers())
-        if response.status_code == 200: return response.json()
-        elif response.status_code == 401: logout()
-        return None
+        return requests.get(f"{API_BASE_URL}/admin/logs", headers=get_auth_headers()).json()
     except: return None
+
+def get_my_notes():
+    try:
+        res = requests.get(f"{API_BASE_URL}/notes", headers=get_auth_headers())
+        return res.json() if res.status_code == 200 else []
+    except: return []
+
+def create_note(title, content):
+    try:
+        requests.post(f"{API_BASE_URL}/notes", json={"title": title, "content": content}, headers=get_auth_headers())
+        st.toast("Заметка создана!", icon="✅")
+        time.sleep(0.5)
+        st.rerun()
+    except: pass
+
+def try_steal_admin_note():
+    try:
+        res = requests.get(f"{API_BASE_URL}/notes/1", headers=get_auth_headers())
+        return res.status_code, res.json()
+    except: return 0, {}
+
+def try_sqli_search(query):
+    try:
+        res = requests.get(f"{API_BASE_URL}/search", params={"query": query}, headers=get_auth_headers())
+        return res.status_code, res.json()
+    except: return 0, []
 
 
 # --- ИНТЕРФЕЙС ---
 
-# 1. ЭКРАН АВТОРИЗАЦИИ (Если нет токена)
 if not st.session_state.access_token:
-    st.set_page_config(page_title="Admin Login", layout="centered")
-    
+    # === ЭКРАН ВХОДА ===
+    st.set_page_config(page_title="Login", layout="centered")
     st.title("🔐 Вход в систему")
-    st.caption("Авторизуйтесь, чтобы управлять защитой API.")
-
-    # Вкладки: Вход / Регистрация
+    
     tab1, tab2 = st.tabs(["Вход", "Регистрация"])
-
+    
     with tab1:
-        with st.form("login_form"):
-            username = st.text_input("Имя пользователя", value="admin")
-            password = st.text_input("Пароль", type="password", value="admin123")
-            submitted = st.form_submit_button("Войти", use_container_width=True)
-            
-            if submitted:
-                login(username, password)
+        with st.form("login"):
+            u = st.text_input("Логин", value="admin")
+            p = st.text_input("Пароль", type="password", value="admin123")
+            # Кнопка отправки формы
+            if st.form_submit_button("Войти", use_container_width=True):
+                if login_process(u, p):
+                    st.rerun() # Делаем реран ТОЛЬКО если успех, и ВНЕ блока try/except
 
     with tab2:
-        with st.form("register_form"):
-            st.caption("Создайте нового пользователя (роль: User)")
-            new_user = st.text_input("Придумайте логин")
-            new_pass = st.text_input("Придумайте пароль", type="password")
-            reg_submitted = st.form_submit_button("Зарегистрироваться", use_container_width=True)
-            
-            if reg_submitted:
-                if new_user and new_pass:
-                    register(new_user, new_pass)
-                else:
-                    st.error("Заполните все поля")
+        with st.form("reg"):
+            u = st.text_input("Новый логин")
+            p = st.text_input("Новый пароль", type="password")
+            if st.form_submit_button("Создать аккаунт", use_container_width=True):
+                register_process(u, p)
+    
+    if st.session_state.error: st.error(st.session_state.error)
+    if st.session_state.success_msg: st.success(st.session_state.success_msg)
 
-    # Сообщения об ошибках/успехе
-    if st.session_state.error:
-        st.error(st.session_state.error)
-    if st.session_state.success_msg:
-        st.success(st.session_state.success_msg)
-
-# 2. ГЛАВНАЯ ПАНЕЛЬ (Если есть токен)
 else:
-    st.set_page_config(page_title="API Security Dashboard", layout="wide")
+    # === ПАНЕЛЬ УПРАВЛЕНИЯ ===
+    st.set_page_config(page_title="Dashboard", layout="wide")
     
     with st.sidebar:
-        st.title(f"👋 Привет, {st.session_state.username}")
-        st.button("Выйти из системы", on_click=logout, use_container_width=True)
+        st.title(f"👤 {st.session_state.username}")
+        if st.session_state.username == "admin":
+            st.badge("ADMIN MODE")
+        else:
+            st.badge("USER MODE")
+        
+        # Исправлена кнопка выхода (убрали callback, сделали прямой вызов)
+        if st.button("Выйти", use_container_width=True):
+            logout_process()
+
+    # --- ЛОГИКА ОТОБРАЖЕНИЯ ПО РОЛЯМ ---
+    
+    # 🔴 ЕСЛИ ЭТО АДМИН 🔴
+    if st.session_state.username == "admin":
+        st.title("🛡️ Панель Управления Защитой")
+        st.info("Режим администратора. Управляйте уязвимостями сервера.")
+        
         st.divider()
-        st.page_link("http://127.0.0.1:8000/docs", label="Документация API (FastAPI)", icon="📄")
-
-    st.title("🛡️ Панель Управления Безопасностью API")
-    st.divider()
-
-    # --- Переключатели ---
-    st.header("⚙️ Переключатели Защиты")
-    config_flags = get_config_flags()
-    
-    if config_flags:
-        cols = st.columns(3)
-        states = {flag['feature']: flag['enabled'] for flag in config_flags}
+        st.subheader("⚙️ Тумблеры Защиты")
+        flags = get_config_flags()
+        if flags:
+            c1, c2, c3 = st.columns(3)
+            states = {f['feature']: f['enabled'] for f in flags}
+            
+            # Используем on_change для моментальной реакции
+            with c1: 
+                st.toggle("IDOR Защита", value=states.get("idor_protection"), key="tg_idor", on_change=toggle_feature, args=("idor_protection",))
+                st.caption("Запретить чтение чужих заметок")
+            with c2: 
+                st.toggle("SQLi Защита", value=states.get("sqli_protection"), key="tg_sqli", on_change=toggle_feature, args=("sqli_protection",))
+                st.caption("Использовать безопасный ORM")
+            with c3: 
+                st.toggle("Rate Limit", value=states.get("rate_limit"), key="tg_rl", on_change=toggle_feature, args=("rate_limit",))
+                st.caption("Блокировать брутфорс")
         
-        with cols[0]:
-            st.subheader("IDOR (BOLA)")
-            st.toggle("Защита от IDOR", value=states.get("idor_protection", False), key="toggle_idor", on_change=toggle_feature, args=("idor_protection",))
-            st.caption("Блокирует доступ к чужим заметкам.")
-
-        with cols[1]:
-            st.subheader("SQL Injection")
-            st.toggle("Защита от SQLi", value=states.get("sqli_protection", False), key="toggle_sqli", on_change=toggle_feature, args=("sqli_protection",))
-            st.caption("Включает безопасные ORM запросы.")
-
-        with cols[2]:
-            st.subheader("Brute-force")
-            st.toggle("Rate Limiter", value=states.get("rate_limit", False), key="toggle_rate_limit", on_change=toggle_feature, args=("rate_limit",))
-            st.caption("Блокирует частые запросы (5 в минуту).")
-    else:
-        st.warning("⚠️ Не удалось загрузить настройки (возможно, токен истек или у вас нет прав админа).")
-
-    st.divider()
-    
-    # --- Логи ---
-    col_log_1, col_log_2 = st.columns([8, 2])
-    with col_log_1:
-        st.header("📜 Журнал Событий")
-    with col_log_2:
-        if st.button("🔄 Обновить логи", use_container_width=True):
-            st.rerun()
-
-    logs_data = get_security_logs()
-    if logs_data:
-        df = pd.DataFrame(logs_data)
-        df_display = df[['timestamp', 'ip', 'user', 'attack_type', 'payload', 'result']]
-        df_display['timestamp'] = pd.to_datetime(df_display['timestamp']).dt.strftime('%H:%M:%S')
+        st.divider()
+        c_log, c_btn = st.columns([8,2])
+        c_log.subheader("📜 Логи Атак")
+        if c_btn.button("Обновить"): st.rerun()
         
-        st.dataframe(
-            df_display, 
-            use_container_width=True,
-            column_config={
-                "timestamp": "Время",
-                "result": st.column_config.TextColumn("Результат"),
-                "attack_type": "Тип Атаки",
-                "payload": "Данные (Payload)"
-            }
-        )
+        logs = get_logs()
+        if logs:
+            df = pd.DataFrame(logs)
+            st.dataframe(df[['timestamp', 'ip', 'user', 'attack_type', 'payload', 'result']], use_container_width=True)
+        else:
+            st.write("Логов нет.")
+
+    # 🟢 ЕСЛИ ЭТО ОБЫЧНЫЙ ПОЛЬЗОВАТЕЛЬ 🟢
     else:
-        st.info("Логов пока нет.")
+        st.title(f"Личный кабинет: {st.session_state.username}")
+        
+        col_left, col_right = st.columns([1, 1])
+        
+        # ЛЕВАЯ КОЛОНКА
+        with col_left:
+            st.subheader("📝 Мои Заметки")
+            notes = get_my_notes()
+            if notes:
+                for n in notes:
+                    with st.expander(f"📌 {n['title']}"):
+                        st.write(n['content'])
+                        st.caption(f"ID заметки: {n['id']}")
+            else:
+                st.info("У вас пока нет заметок.")
+            
+            st.divider()
+            with st.form("add_note"):
+                st.caption("Добавить новую заметку")
+                t = st.text_input("Заголовок")
+                c = st.text_area("Содержание")
+                if st.form_submit_button("Сохранить"): create_note(t, c)
+
+        # ПРАВАЯ КОЛОНКА
+        with col_right:
+            st.subheader("🕵️ Зона Самопроверки (Hacker Zone)")
+            st.warning("Здесь вы можете проверить, защищен ли сервер.")
+            
+            st.write("#### 1. Тест IDOR")
+            st.caption("Попытка прочитать Секретную Заметку Админа (ID=1).")
+            if st.button("🔥 Украсть заметку Админа"):
+                code, data = try_steal_admin_note()
+                if code == 200:
+                    st.error("УСПЕХ! УЯЗВИМОСТЬ НАЙДЕНА!")
+                    st.json(data)
+                else:
+                    st.success(f"ДОСТУП ЗАПРЕЩЕН (Код {code}). Защита работает.")
+            
+            st.divider()
+            
+            st.write("#### 2. Тест SQL Injection")
+            st.caption("Поиск с пейлоадом: `' OR '1'='1`")
+            if st.button("🔥 Выполнить SQL-инъекцию"):
+                code, data = try_sqli_search("' OR '1'='1")
+                if code == 200 and len(data) > 0:
+                    st.error(f"УСПЕХ! УЯЗВИМОСТЬ НАЙДЕНА! Получено {len(data)} записей.")
+                    st.dataframe(data)
+                elif code == 500:
+                    st.warning("Сервер упал (Ошибка 500). Это тоже уязвимость.")
+                else:
+                    st.success("БЕЗОПАСНО. Данные не утекли.")

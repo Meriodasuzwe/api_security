@@ -608,16 +608,31 @@ def search_notes(
             
     else:
         # --- ❌ УЯЗВИМЫЙ РЕЖИМ (OFF) ---
-        # Используем f-string для конструирования raw SQL (ОЧЕНЬ ПЛОХО!)
-        # Для демо мы даже не фильтруем по юзеру, чтобы ' OR '1'='1 вытащило ВСЁ
+        # ОЧЕНЬ ПЛОХОЙ КОД: Прямая вставка строки в SQL
         
-        raw_sql = f"SELECT id, title, content, owner_id FROM notes WHERE title LIKE '%{query}%'"
+        # Мы используем text() для исполнения raw SQL, но проблема 500 ошибки
+        # часто возникает из-за того, как SQLAlchemy обрабатывает кавычки.
+        # Упростим запрос для надежности демо:
+        
+        raw_sql = "SELECT id, title, content, owner_id FROM notes WHERE title LIKE '%" + query + "%'"
         
         try:
             # Выполняем небезопасный запрос
+            # connection.execute() возвращает курсор, из него берем данные
             results = db.execute(text(raw_sql)).fetchall()
             
-            # Логгируем УСПЕШНУЮ атаку, если payload выглядит как атака
+            # Преобразуем результат в список словарей (чтобы Pydantic не ругался)
+            notes_list = []
+            for row in results:
+                # row - это кортеж или объект Row, зависисит от версии
+                notes_list.append({
+                    "id": row.id,
+                    "title": row.title,
+                    "content": row.content,
+                    "owner_id": row.owner_id
+                })
+
+            # Логгируем УСПЕШНУЮ атаку
             if "'" in query or "OR" in query.upper():
                  log_security_event(
                     db=db,
@@ -628,19 +643,21 @@ def search_notes(
                     result="Success (Vulnerable)"
                 )
                  
-            return results
+            return notes_list
             
         except Exception as e:
-            # Ошибка, если SQL синтаксически неверный
+            # Если SQL совсем кривой, вернем ошибку, но понятную
+            print(f"SQL Error: {e}") # Для отладки в консоль
             log_security_event(
                 db=db,
                 ip=request.client.host,
                 user=current_user.username,
                 attack_type="SQLi",
                 payload=f"Failed SQL execution: {raw_sql}",
-                result="Blocked (Error)"
+                result="Blocked (Error 500)"
             )
-            raise HTTPException(status_code=400, detail=f"Invalid search query: {str(e)}")
+            # Возвращаем пустой список вместо краша 500, чтобы скрипт не падал
+            return []
 
 
 # --- 9. АДМИН-ЭНДПОИНТЫ ---
