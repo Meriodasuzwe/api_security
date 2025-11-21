@@ -7,12 +7,5 @@
 
 * **Backend:** FastAPI (Python) — реализация API, JWT Auth, RBAC.
 * **Database:** SQLite + SQLAlchemy (ORM).
-* **Admin UI:** Streamlit — панель управления защитой и мониторинг логов.
+* **Frontend(Admin UI),.:** Streamlit — панель управления защитой и мониторинг логов.
 * **Security:** Argon2 (hashing), JWT (Access/Refresh), Rate Limiting.
-
-## 🚀 Установка и Запуск
-
-1. **Клонируйте репозиторий:**
-   ```bash
-   git clone <ваша-ссылка-на-repo>
-   cd courseproject
