@@ -1,23 +1,14 @@
-# --- НЕОБХОДИМЫЕ УСТАНОВКИ ---
-#
-# 1. Создай venv: python -m venv venv
-# 2. Активируй:   source venv/bin/activate (или venv\Scripts\activate)
-# 3. Установи:
-# pip install "fastapi[all]" uvicorn sqlalchemy passlib[bcrypt] python-jose[cryptography] argon2-cffi
-#
-# (argon2-cffi может потребовать доп. установки, если не пойдет,
-# замени в PWD_CONTEXT "argon2" на "bcrypt" - это тоже безопасно)
-#
-# 4. Запуск: uvicorn main:app --reload
-#
+
 # ---------------------------------
 
 import time
 import logging
+import os
+from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import List, Optional
-
+load_dotenv()
 # --- FastAPI & Uvicorn ---
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -36,7 +27,7 @@ from jose import JWTError, jwt
 
 # --- Конфигурация ---
 DATABASE_URL = "sqlite:///./test.db"
-SECRET_KEY = "YOUR_SUPER_SECRET_KEY_CHANGE_ME" # Обязательно смени
+SECRET_KEY = os.getenv("SECRET_KEY", "unsafe-default-key-for-dev") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
