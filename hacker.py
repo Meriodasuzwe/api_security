@@ -12,7 +12,7 @@ def print_info(msg): console.print(f"[cyan]{msg}[/cyan]")
 def run_attacks():
     console.rule("[bold]💀 ЗАПУСК АТАКИ ХАКЕРА[/bold]")
 
-    # 1. Логинимся как злоумышленник (Alice)
+    # 1. Логинимся как злоумышленник 
     try:
         auth = requests.post(f"{API_BASE_URL}/token", data={"username": "alice", "password": "alice123"})
         if auth.status_code != 200:
