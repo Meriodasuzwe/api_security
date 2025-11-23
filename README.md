@@ -9,3 +9,4 @@
 * **Database:** SQLite + SQLAlchemy (ORM).
 * **Frontend(Admin UI).:** Streamlit — панель управления защитой и мониторинг логов.
 * **Security:** Argon2 (hashing), JWT (Access/Refresh), Rate Limiting.
+* **Monitoring:**@BotFather Telegram bot - REST_Alert_Bot 
